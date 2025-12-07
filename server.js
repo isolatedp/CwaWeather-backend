@@ -126,6 +126,145 @@ const getKaohsiungWeather = async (req, res) => {
   }
 };
 
+
+// 建立縣市對造表
+const cityNameMap = {
+  "臺北市": "TaipeiCity",
+  "新北市": "NewTaipeiCity",
+  "桃園市": "TaoyuanCity",
+  "臺中市": "TaichungCity",
+  "臺南市": "TainanCity",
+  "高雄市": "KaohsiungCity",
+  "基隆市": "KeelungCity",
+  "新竹市": "HsinchuCity",
+  "新竹縣": "HsinchuCounty",
+  "苗栗縣": "MiaoliCounty",
+  "彰化縣": "ChanghuaCounty",
+  "南投縣": "NantouCounty",
+  "雲林縣": "YunlinCounty",
+  "嘉義市": "ChiayiCity",
+  "嘉義縣": "ChiayiCounty",
+  "屏東縣": "PingtungCounty",
+  "宜蘭縣": "YilanCounty",
+  "花蓮縣": "HualienCounty",
+  "臺東縣": "TaitungCounty",
+  "金門縣": "KinmenCounty",
+  "連江縣": "LienchiangCounty",
+  "澎湖縣": "PenghuCounty"
+};
+
+// 取得各縣市的天氣資料
+const getWeather = async (req, res) => {
+  try {
+    // 檢查是否有設定 API Key
+    if (!CWA_API_KEY) {
+      return res.status(500).json({
+        error: "伺服器設定錯誤",
+        message: "請在 .env 檔案中設定 CWA_API_KEY",
+      });
+    }
+
+    // 呼叫 CWA API - 一般天氣預報（36小時）
+    // API 文件: https://opendata.cwa.gov.tw/dist/opendata-swagger.html
+    const response = await axios.get(
+      `${CWA_API_BASE_URL}/v1/rest/datastore/F-C0032-001`,
+      {
+        params: {
+          Authorization: CWA_API_KEY
+        },
+      }
+    );
+
+    // 取得各縣市的天氣資料
+    const locations = response.data.records.location;
+    if (!locations) {
+      return res.status(404).json({
+        error: "查無資料",
+        message: "無法取得天氣資料",
+      });
+    }
+
+    const result = {};
+    locations.forEach((locationData) => {
+      const cityZh = locationData.locationName;
+      const city = cityNameMap[cityZh] || cityZh;
+
+      // 整理天氣資料
+      // 整理天氣資料
+      const weatherData = {
+        city: cityZh,
+        updateTime: response.data.records.datasetDescription,
+        forecasts: [],
+      };
+
+      // 解析天氣要素
+      const weatherElements = locationData.weatherElement;
+      const timeCount = weatherElements[0].time.length;
+
+      for (let i = 0; i < timeCount; i++) {
+        const forecast = {
+          startTime: weatherElements[0].time[i].startTime,
+          endTime: weatherElements[0].time[i].endTime,
+          weather: "",
+          rain: "",
+          minTemp: "",
+          maxTemp: "",
+          comfort: "",
+          windSpeed: "",
+        };
+
+        weatherElements.forEach((element) => {
+          const value = element.time[i].parameter;
+          switch (element.elementName) {
+            case "Wx":
+              forecast.weather = value.parameterName;
+              break;
+            case "PoP":
+              forecast.rain = value.parameterName + "%";
+              break;
+            case "MinT":
+              forecast.minTemp = value.parameterName + "°C";
+              break;
+            case "MaxT":
+              forecast.maxTemp = value.parameterName + "°C";
+              break;
+            case "CI":
+              forecast.comfort = value.parameterName;
+              break;
+            case "WS":
+              forecast.windSpeed = value.parameterName;
+              break;
+          }
+        });
+        weatherData.forecasts.push(forecast);
+      }
+    result[city] = weatherData;
+    });
+
+    res.json({
+        success: true,
+        data: result,
+    });
+  } catch (error) {
+    console.error("取得天氣資料失敗:", error.message);
+
+    if (error.response) {
+      // API 回應錯誤
+      return res.status(error.response.status).json({
+        error: "CWA API 錯誤",
+        message: error.response.data.message || "無法取得天氣資料",
+        details: error.response.data,
+      });
+    }
+
+    // 其他錯誤
+    res.status(500).json({
+      error: "伺服器錯誤",
+      message: "無法取得天氣資料，請稍後再試",
+    });
+  }
+}
+
 // Routes
 app.get("/", (req, res) => {
   res.json({
@@ -143,6 +282,9 @@ app.get("/api/health", (req, res) => {
 
 // 取得高雄天氣預報
 app.get("/api/weather/kaohsiung", getKaohsiungWeather);
+
+// 取得全台天氣預報
+app.get("/api/weather", getWeather);
 
 // Error handling middleware
 app.use((err, req, res, next) => {
